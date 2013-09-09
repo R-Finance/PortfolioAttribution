@@ -5,9 +5,9 @@ Version: 0.3
 Date: $Date$
 Author: Andrii Babii
 Maintainer: Andrii Babii <babiy.andrew@gmail.com>
-Description: This package provides functions for the ex-post Portfolio Attribution methods 
-from Bacon (2004), Carino (2009), etc. The package was created as a part of the 
-Google Summer of Code (GSoC) 2012 project.
+Description: This package provides functions for the ex-post Portfolio Attribution 
+    methods from Bacon (2004), Carino (2009), etc. 
+    The package was initially created as a part of the Google Summer of Code (GSoC) 2012 project.
 Depends:
     R (>= 2.15.0),
     zoo,
