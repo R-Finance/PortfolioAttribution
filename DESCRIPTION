@@ -1,20 +1,20 @@
 Package: PortfolioAttribution
 Type: Package
-Title: Econometric tools for performance and risk analysis.
+Title:  Performance attribution tools used for identifying sources of portfolio return and risk.
 Version: 0.3
 Date: $Date$
 Author: Andrii Babii
 Maintainer: Andrii Babii <babiy.andrew@gmail.com>
-Description: This package provides functions for the ex-post Portfolio Attribution 
-    methods from Bacon (2004), Carino (2009), etc. 
-    The package was initially created as a part of the Google Summer of Code (GSoC) 2012 project.
+Description: This package provides functions for the ex-post portfolio attribution methods described in Christopherson, Carino and Ferson (2009), Bacon (2008), and several other sources. The package was initially created as a part of the Google Summer of Code (GSoC) 2012 project.
 Depends:
     R (>= 2.15.0),
     zoo,
     xts (>= 0.8),
     PerformanceAnalytics(>= 1.0.4.3)
 Suggests:
-    plyr
+    plyr,
+    FinancialInstrument
 License: GPL
 URL: http://r-forge.r-project.org/projects/returnanalytics/
+Contributors: David Carino, Doug Martin, Brian Peterson, Peter Carl
 Copyright: (c) 2004-2013
