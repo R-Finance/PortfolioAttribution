@@ -1,0 +1,592 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage{amssymb,amsmath,amsthm,amsxtra, amsfonts}
+\usepackage{booktabs}
+\usepackage{dcolumn}
+\usepackage{epsfig}
+\usepackage{epstopdf}
+\usepackage{graphicx}
+\usepackage{setspace}
+\onehalfspacing
+\usepackage[top=3cm, bottom=2cm, left=3cm, right=1.5cm]{geometry}
+\usepackage{todonotes}
+\reversemarginpar
+\marginparwidth 2cm
+\usepackage{color}
+\usepackage[round]{natbib}
+\definecolor{darkblue}{rgb}{0.0,0.0,0.3}
+\usepackage{hyperref}
+\hypersetup{colorlinks = true,
+            breaklinks = true,
+            linkcolor = darkblue,
+            urlcolor = darkblue,
+            anchorcolor = darkblue,
+            citecolor = darkblue}
+\usepackage[all]{hypcap}
+\usepackage{pgfplots}
+\usepackage{enumitem}
+\setlist{noitemsep, nolistsep}
+
+
+\begin{document}
+
+\title{Performance Attribution in R}
+\author{Andrii Babii}
+\maketitle
+\begin{abstract}
+This paper demonstrates some Performance Attribution functionality in R. The brief overview of the performance attribution methodology is offered with illustrative practical examples. The discussion draws heavily from \cite{christopherson2009portfolio} and \cite{bacon2008practical} where more details can be found.
+\end{abstract}
+
+\section{Introduction}
+Performance attribution methodology allows us to decompose the value added by the portfolio into different components and, thus, to evaluate the quality of investment decisions. This usually boils down to the decomposition of the excess returns (relative to the benchmark). If components are different market factors, we obtain the so-called factor-based attribution. If, on the other hand, we decompose excess returns into different sectors of the portfolio we obtain the sector-based attribution.
+
+This paper discusses mainly the latter. For the factor-based attribution check \cite{fama1972components} or corresponding sections in the aforementioned books. There are many examples where the setup of the sector-based attribution could be useful, see \cite{christopherson2009portfolio} for more details:
+\begin{itemize}
+  \item \textbf{The multi-asset class fund:} each asset class might be considered as a separate portfolio with a distinct benchmark. The decision process boils down to the allocation of weights for different classes and the selection of securities within each class.
+  \item \textbf{The multicountry portfolio.} The top-level decision is the allocation of weights to different countries. The next stage is to pick up securities within each country.
+  \item \textbf{The equity portfolio.} We can segment the equity portfolio by sectors or industries. The top-level decision is the allocation of weights to different industries and the decision on the next level is to select securities. More generally, the highest-level decision might be the allocation of weights to different portfolio managers, after which each manager makes his decision on industries and securities.
+\end{itemize}
+
+There are several levels of complexity in the attribution analysis: we can have multiple periods, multiple levels of the decision process, different currencies (in the case of multicountry portfolio), different financial instruments (stocks, fixed income, etc.). Another issue is the choice of returns: the decomposition can be imposed on the arithmetic or geometric excess returns.
+
+We will start with the simplest example of the single-period, single-level attribution and then proceed to more complex cases.
+
+\section{Implementation of the performance attribution}
+\subsection{Arithmetic attribution}
+In the arithmetic attribution we decompose the arithmetic excess returns into three components: allocation, interaction and selection effects across $n$ sectors
+\[
+  R_{p}-R_{b}=\sum^{n}_{i=1}\left(A_{i}+S_{i}+I_{i}\right)
+\]
+
+\subsubsection{\cite{brinson1985measuring} vs \cite{brinson1986determinants}}
+There are two ways to compute the arithmetic attribution effects for the category $i$. One is due to \cite{brinson1986determinants}
+\[
+  \begin{aligned}
+    A_{i} & =(w_{pi}-w_{bi})\times R_{bi} \\
+    S_{i} & = w_{pi}\times(R_{pi}-R_{bi}) \\
+    I_{i} & = (w_{pi}-w_{bi})\times(R_{pi}-R_{bi})
+  \end{aligned}
+\]
+Another is due to \cite{brinson1985measuring}. In this approach the selection and interaction effects are the same as in \cite{brinson1986determinants} while the allocation effect is different
+\[
+  A_i = (w_{pi} - w_{bi})\times (R_{bi} - R_b)
+\]
+
+\subsubsection{Top-down vs Bottom-up}
+Usually we are interested in the allocation and selection effects only. However, by construction they don't sum up to the excess returns. That's why we combine the interaction effect either with the security selection or with the asset allocation effects which is known as "top-down" and "bottom-up" approaches respectively.
+
+\subsubsection{Multi-period linking}
+One problem with the multi-period attribution analysis in the case of the arithmetic returns is that the arithmetic returns do not link naturally through time. As a result, the attribution effects can't also be simply linked through time. To overcome this obstacle several methods that smooth arithmetic attribution effects were suggested. The function supports the following popular methods:
+\begin{itemize}
+  \item \cite{carino1999combining}: based on the logarithmic smoothing.
+  \item \cite{menchero2000optimized}: adjust by the multiplicative factor based on some optimized criterion.
+  \item \cite{grap1997}: another scaling method, where adjustment factors depend on the portfolio and benchmark returns linked through multiple periods.
+  \item \cite{frongello2002linking}: uses similar concept as GRAP, the scaling factor is computed recursively. Very intuitive and mathematically simple.
+  \item \cite{davies2001multiple}: based on the idea of applying the Brinson model over multiple periods.
+\end{itemize}
+There are some subtleties involved with each smoothing method but the choice of one is probably a matter of personal tastes.
+
+\subsubsection{Examples}
+We load the data set of portfolio and benchmark returns.
+\begingroup
+\fontsize{9pt}{12pt}\selectfont
+\begin{verbatim}
+> data(attrib)
+> Rp = attrib.returns[, 1:10]
+> Rb = attrib.returns[, 11:20]
+\end{verbatim}
+\endgroup
+
+The portfolio includes 9 stocks and one 10-Year Treasury Constant Maturity (GS10) instrument. Returns are quarterly and include 7 observations though time. The benchmark for stocks is S\&P 500 index. The benchmark for fixed income instrument is 3-Month Treasury Bill.
+\begingroup
+\fontsize{9pt}{12pt}\selectfont
+\begin{verbatim}
+> Rp
+          CA.PA     CVX   FP.PA      GE     IBM      KO     PEP     WMT     XOM   GS10
+2007 Q2 -0.0488  0.1301  0.1388  0.0793  0.1103  0.0860  0.0201  0.0244  0.1059 0.0469
+2007 Q3 -0.0595  0.1051 -0.0553  0.0784  0.1126  0.0941  0.1219 -0.0973  0.0985 0.0500
+2007 Q4  0.0813 -0.0027 -0.0033 -0.1105 -0.0859  0.0657  0.0354  0.0852  0.0121 0.0453
+2008 Q1 -0.0866 -0.0893 -0.1891 -0.0016  0.0631 -0.0082 -0.0500  0.1029 -0.1023 0.0374
+2008 Q2 -0.3068  0.1496  0.1417 -0.3269  0.0290 -0.1579 -0.1270  0.0647  0.0411 0.0368
+2008 Q3 -0.0829 -0.1839 -0.2413 -0.0456 -0.0133  0.0172  0.1140  0.0636 -0.1265 0.0401
+2008 Q4 -0.1846 -0.1089 -0.0901 -0.4537 -0.3291 -0.1554 -0.2633 -0.0661  0.0276 0.0381
+> Rb
+          SP500 SP500.1 SP500.2 SP500.3 SP500.4 SP500.5 SP500.6 SP500.7 SP500.8  TB3MS
+2007 Q2  0.0324  0.0324  0.0324  0.0324  0.0324  0.0324  0.0324  0.0324  0.0324 0.0487
+2007 Q3  0.0645  0.0645  0.0645  0.0645  0.0645  0.0645  0.0645  0.0645  0.0645 0.0482
+2007 Q4  0.0180  0.0180  0.0180  0.0180  0.0180  0.0180  0.0180  0.0180  0.0180 0.0390
+2008 Q1 -0.0667 -0.0667 -0.0667 -0.0667 -0.0667 -0.0667 -0.0667 -0.0667 -0.0667 0.0275
+2008 Q2 -0.0547 -0.0547 -0.0547 -0.0547 -0.0547 -0.0547 -0.0547 -0.0547 -0.0547 0.0129
+2008 Q3 -0.0643 -0.0643 -0.0643 -0.0643 -0.0643 -0.0643 -0.0643 -0.0643 -0.0643 0.0163
+2008 Q4 -0.1014 -0.1014 -0.1014 -0.1014 -0.1014 -0.1014 -0.1014 -0.1014 -0.1014 0.0067
+\end{verbatim}
+\endgroup
+
+Weights of assets in the portfolio and benchmark weights are
+\begingroup
+\fontsize{9pt}{12pt}\selectfont
+\begin{verbatim}
+> wp
+[1] 0.10 0.20 0.30 0.05 0.05 0.01 0.02 0.03 0.04 0.20
+> wb
+[1] 0.05 0.05 0.02 0.01 0.07 0.03 0.03 0.06 0.08 0.60
+\end{verbatim}
+\endgroup
+
+The starting point is the "Attribution" function which takes portfolio and benchmark weights and returns as inputs. The output is a list with several objects.
+\begingroup
+\fontsize{9pt}{12pt}\selectfont
+\begin{verbatim}
+> Attribution(Rp, wp, Rb, wb, method = "top.down", linking = "carino")
+$`Excess returns`
+                  Arithmetic
+2007 Q2               0.0457
+2007 Q3              -0.0323
+2007 Q4              -0.0204
+2008 Q1              -0.0646
+2008 Q2               0.0478
+2008 Q3              -0.0972
+2008 Q4              -0.0700
+Annualized Return    -0.1149
+
+$Allocation
+          CA.PA     CVX   FP.PA      GE     IBM      KO     PEP     WMT     XOM    GS10   Total
+2007 Q2  0.0016  0.0049  0.0091  0.0013 -0.0006 -0.0006 -0.0003 -0.0010 -0.0013 -0.0195 -0.0065
+2007 Q3  0.0032  0.0097  0.0181  0.0026 -0.0013 -0.0013 -0.0006 -0.0019 -0.0026 -0.0193  0.0065
+2007 Q4  0.0009  0.0027  0.0050  0.0007 -0.0004 -0.0004 -0.0002 -0.0005 -0.0007 -0.0156 -0.0084
+2008 Q1 -0.0033 -0.0100 -0.0187 -0.0027  0.0013  0.0013  0.0007  0.0020  0.0027 -0.0110 -0.0377
+2008 Q2 -0.0027 -0.0082 -0.0153 -0.0022  0.0011  0.0011  0.0005  0.0016  0.0022 -0.0052 -0.0270
+2008 Q3 -0.0032 -0.0096 -0.0180 -0.0026  0.0013  0.0013  0.0006  0.0019  0.0026 -0.0065 -0.0322
+2008 Q4 -0.0051 -0.0152 -0.0284 -0.0041  0.0020  0.0020  0.0010  0.0030  0.0041 -0.0027 -0.0432
+Total   -0.0091 -0.0272 -0.0508 -0.0073  0.0036  0.0036  0.0018  0.0054  0.0073 -0.0744 -0.1470
+
+$Selection
+          CA.PA     CVX   FP.PA      GE     IBM      KO     PEP     WMT     XOM    GS10   Total
+2007 Q2 -0.0081  0.0195  0.0319  0.0023  0.0039  0.0005 -0.0002 -0.0002  0.0029 -0.0004  0.0522
+2007 Q3 -0.0124  0.0081 -0.0359  0.0007  0.0024  0.0003  0.0011 -0.0049  0.0014  0.0004 -0.0388
+2007 Q4  0.0063 -0.0041 -0.0064 -0.0064 -0.0052  0.0005  0.0003  0.0020 -0.0002  0.0013 -0.0120
+2008 Q1 -0.0020 -0.0045 -0.0367  0.0033  0.0065  0.0006  0.0003  0.0051 -0.0014  0.0020 -0.0269
+2008 Q2 -0.0252  0.0408  0.0589 -0.0136  0.0042 -0.0010 -0.0014  0.0036  0.0038  0.0048  0.0748
+2008 Q3 -0.0019 -0.0239 -0.0531  0.0009  0.0025  0.0008  0.0036  0.0038 -0.0025  0.0048 -0.0649
+2008 Q4 -0.0083 -0.0015  0.0034 -0.0176 -0.0114 -0.0005 -0.0032  0.0011  0.0052  0.0063 -0.0268
+Total   -0.0486  0.0290 -0.0417 -0.0298  0.0021  0.0011  0.0004  0.0106  0.0086  0.0188 -0.0495
+\end{verbatim}
+\endgroup
+The first element of the list is the excess arithmetic returns which are the object of the decomposition. The allocation, selection and interaction effects are reported for individual assets and time periods. However, usually we are only interested in the total attribution effects in each period or in the summarized attribution effects for multiple periods. These come in the last column and the bottom row. The bottom-right element is the the total allocation effect of the portfolio.
+
+As an example we can see that in the second quarter of $2007$, the excess return of portfolio was $0.0457$. In which $-0.0065$ was due to the allocation of weights and $0.0522$ due to the selection of financial instruments.
+
+Note that in this decomposition we selected to display the "top-down" approach (the selection effect includes the interaction term) and used the Carino linking.
+
+\subsection{Geometric attribution}
+We can also perform the attribution analysis for the geometric excess returns. This comes with some advantages, since the geometric attribution effects in the contrast with arithmetic do naturally link over time multiplicatively:
+\[
+  \frac{(1+R_{p})}{1+R_{b}}-1 = \prod^{n}_{t=1}(1+A_{t}^{G}) \times \prod^{n}_{t=1}(1+S{}_{t}^{G})-1
+\]
+Note that another advantage of using geometric attribution is that we don't have to deal with the interaction term.
+
+\subsubsection{Examples}
+As was mentioned the simplicity of the geometric attribution does not require hiding the interaction term or smoothing
+\begingroup
+\fontsize{9pt}{12pt}\selectfont
+\begin{verbatim}
+> Attribution(Rp, wp, Rb, wb, geometric = TRUE)
+$`Excess returns`
+                  Geometric
+2007 Q2              0.0438
+2007 Q3             -0.0300
+2007 Q4             -0.0225
+2008 Q1             -0.0646
+2008 Q2              0.0480
+2008 Q3             -0.0991
+2008 Q4             -0.0642
+Annualized Return   -0.1084
+
+$Allocation
+          CA.PA     CVX   FP.PA      GE     IBM      KO    PEP     WMT     XOM    GS10   Total
+2007 Q2 -0.0005 -0.0014 -0.0026 -0.0004  0.0002  0.0002  1e-04  0.0003  0.0004 -0.0025 -0.0062
+2007 Q3  0.0005  0.0014  0.0026  0.0004 -0.0002 -0.0002 -1e-04 -0.0003 -0.0004  0.0024  0.0062
+2007 Q4 -0.0006 -0.0018 -0.0034 -0.0005  0.0002  0.0002  1e-04  0.0004  0.0005 -0.0033 -0.0081
+2008 Q1 -0.0029 -0.0086 -0.0161 -0.0023  0.0012  0.0012  6e-04  0.0017  0.0023 -0.0150 -0.0381
+2008 Q2 -0.0021 -0.0064 -0.0120 -0.0017  0.0009  0.0009  4e-04  0.0013  0.0017 -0.0102 -0.0274
+2008 Q3 -0.0026 -0.0079 -0.0147 -0.0021  0.0011  0.0011  5e-04  0.0016  0.0021 -0.0116 -0.0326
+2008 Q4 -0.0037 -0.0111 -0.0207 -0.0030  0.0015  0.0015  7e-04  0.0022  0.0030 -0.0150 -0.0445
+Total        NA      NA      NA      NA      NA      NA     NA      NA      NA      NA -0.1424
+
+$Selection
+          CA.PA     CVX   FP.PA      GE     IBM      KO     PEP     WMT     XOM    GS10   Total
+2007 Q2 -0.0078  0.0189  0.0308  0.0023  0.0038  0.0005 -0.0002 -0.0002  0.0028 -0.0003  0.0504
+2007 Q3 -0.0117  0.0077 -0.0339  0.0007  0.0023  0.0003  0.0011 -0.0046  0.0013  0.0003 -0.0365
+2007 Q4  0.0062 -0.0040 -0.0063 -0.0063 -0.0051  0.0005  0.0003  0.0020 -0.0002  0.0012 -0.0117
+2008 Q1 -0.0021 -0.0047 -0.0385  0.0034  0.0068  0.0006  0.0004  0.0053 -0.0015  0.0021 -0.0282
+2008 Q2 -0.0263  0.0426  0.0614 -0.0142  0.0044 -0.0011 -0.0015  0.0037  0.0040  0.0050  0.0780
+2008 Q3 -0.0020 -0.0251 -0.0558  0.0010  0.0027  0.0009  0.0037  0.0040 -0.0026  0.0050 -0.0682
+2008 Q4 -0.0090 -0.0016  0.0037 -0.0191 -0.0124 -0.0006 -0.0035  0.0011  0.0056  0.0068 -0.0291
+Total        NA      NA      NA      NA      NA      NA      NA      NA      NA      NA -0.0521
+
+\end{verbatim}
+\endgroup
+The object of interest is usually the last column with total attribution effects for each period and the multi-period attribution effects in the bottom-left of the table. The interpretation is exactly the same as in the previous case with the only difference that the attribution effects yield the excess returns mutiplicatively.
+
+\subsection{Multi-level attribution}
+The multi-level decision process gives another level of complexity. For the multi-level performance attribution we need to specify the portfolio hierarchy. The hierarchy object is compatible with the \textit{Blotter} package. It can be quite arbitrary including textual description as well as numeric values, e.g. market capitalization. If numeric values are used in the hierarchy, the decomposition is performed into 5 quintiles. For example we may have the following hierarchy object
+\begingroup
+\fontsize{9pt}{12pt}\selectfont
+\begin{verbatim}
+> data(attrib)
+> h = attrib.hierarchy
+> h
+   primary_id  type currency                Sector    MarketCap
+1       CA.PA stock      EUR     Consumer Services   9510000000
+2         CVX stock      USD                Energy 211860229230
+3       FP.PA stock      EUR                Energy  82670000000
+4          GE stock      USD                Energy 216462224160
+5         IBM stock      USD            Technology 226002120120
+6          KO stock      USD Consumer Non-Durables 178581002000
+7         PEP stock      USD Consumer Non-Durables 110666163400
+8         WMT stock      USD     Consumer Services 240597756250
+9         XOM stock      USD                Energy 403445280000
+10       GS10  bond      USD            Government           NA
+\end{verbatim}
+\endgroup
+
+Besides specifying the hierarchy object we need to define levels of the decision process. This is specified as a vector with names of the corresponding columns in the hierarchy. As an example we use imaginary portfolio where on the highest level the allocation between different instruments. The next level is the allocation between specific sectors. The last stage of this decision process is the allocation between different companies by market capitalization.
+\begingroup
+\fontsize{9pt}{12pt}\selectfont
+\begin{verbatim}
+> Attribution.levels(Rp, wp, Rb, wb, h, c("type", "MarketCap", "Sector"))
+$`Excess returns`
+                  Geometric
+2007 Q2              0.0438
+2007 Q3             -0.0300
+2007 Q4             -0.0225
+2008 Q1             -0.0646
+2008 Q2              0.0480
+2008 Q3             -0.0991
+2008 Q4             -0.0642
+Annualized Return   -0.1084
+
+$`Multi-level attribution`
+        Level 1 Allocation Level 2 Allocation Level 3 Allocation Selection
+2007 Q2            -0.0305            -0.0084            -0.0008    0.0868
+2007 Q3            -0.0323            -0.0166            -0.0017    0.0209
+2007 Q4            -0.0241            -0.0047            -0.0005    0.0069
+2008 Q1            -0.0117             0.0179             0.0017   -0.0717
+2008 Q2            -0.0053             0.0146             0.0014    0.0370
+2008 Q3            -0.0083             0.0172             0.0017   -0.1084
+2008 Q4            -0.0027             0.0275             0.0026   -0.0891
+Total              -0.1098             0.0476             0.0045   -0.1266
+
+$`Attribution at each level`
+$`Attribution at each level`$`Level 1`
+          stock
+2007 Q2 -0.0112
+2007 Q3 -0.0109
+2007 Q4 -0.0091
+2008 Q1 -0.0069
+2008 Q2 -0.0039
+2008 Q3 -0.0054
+2008 Q4 -0.0044
+Total   -0.0507
+
+$`Attribution at each level`$`Level 2`
+        stock-Quintile 1 stock-Quintile 2 stock-Quintile 3 stock-Quintile 4 stock-Quintile 5
+2007 Q2          -0.0035           0.0003          -0.0017          -0.0002           0.0006
+2007 Q3          -0.0069           0.0006          -0.0033          -0.0004           0.0011
+2007 Q4          -0.0019           0.0002          -0.0009          -0.0001           0.0003
+2008 Q1           0.0074          -0.0007           0.0036           0.0004          -0.0012
+2008 Q2           0.0061          -0.0006           0.0029           0.0004          -0.0010
+2008 Q3           0.0071          -0.0007           0.0034           0.0004          -0.0012
+2008 Q4           0.0114          -0.0011           0.0055           0.0007          -0.0019
+Total             0.0197          -0.0018           0.0095           0.0012          -0.0033
+
+$`Attribution at each level`$`Level 3`
+        stock-Quintile 1-Consumer Services stock-Quintile 1-Energy stock-Quintile 2-Consumer Non-Durables
+2007 Q2                              0e+00                 -0.0005                                      0
+2007 Q3                             -1e-04                 -0.0009                                      0
+2007 Q4                              0e+00                 -0.0003                                      0
+2008 Q1                              1e-04                  0.0009                                      0
+2008 Q2                              1e-04                  0.0008                                      0
+2008 Q3                              1e-04                  0.0009                                      0
+2008 Q4                              1e-04                  0.0014                                      0
+Total                                2e-04                  0.0024                                      0
+        stock-Quintile 3-Energy stock-Quintile 4-Energy stock-Quintile 4-Technology
+2007 Q2                       0                  -1e-04                           0
+2007 Q3                       0                  -2e-04                           0
+2007 Q4                       0                  -1e-04                           0
+2008 Q1                       0                   2e-04                           0
+2008 Q2                       0                   2e-04                           0
+2008 Q3                       0                   2e-04                           0
+2008 Q4                       0                   3e-04                           0
+Total                         0                   5e-04                           0
+        stock-Quintile 5-Consumer Services stock-Quintile 5-Energy
+2007 Q2                              1e-04                   1e-04
+2007 Q3                              2e-04                   2e-04
+2007 Q4                              0e+00                   0e+00
+2008 Q1                             -2e-04                  -2e-04
+2008 Q2                             -1e-04                  -1e-04
+2008 Q3                             -2e-04                  -2e-04
+2008 Q4                             -2e-04                  -2e-04
+Total                               -4e-04                  -4e-04
+
+\end{verbatim}
+\endgroup
+
+We are already familiar with the first object in the list which is excess return. The next object gives as the general picture about 3 allocation and selection effects. Lastly the allocation effects at each level are demonstrated.
+
+\subsection{Fixed income attribution}
+Previously we considered the attribution analysis for all instruments together. However, the the investment process for some financial instruments may be very different. For example, the investment decision process for bond managers is not the same as for equity managers. The standard Brinson model is simply not suitable for most fixed income investment strategies.
+
+Bonds are viewed as a series of future cash flows which are relatively easy to price. Fixed income performance is driven by changes in the shape of the yield curve. Systematic risk in the form of duration is a key part of the investment process. Fixed income attribution is, in fact, a specialist form of risk-adjusted attribution. The arithmetic attribution is handled using weighted duration approach suggested in \cite{van2000fixed}. Following notation of \cite{bacon2008practical}, the allocation, selection and currency allocation effects for category $i$ are:
+\[
+\begin{aligned}
+  A_{i} & = (D_{pi}\times w_{pi}-D_{\beta}\times D_{bi}\times w_{pi})\times (-\Delta y_{bi} + \Delta y_{b}) \\
+  S_{i} & = D_{i}\times w_{pi}\times (-\Delta y_{ri} + \Delta y_{bi}) \\
+  C_{i} & = (w_{pi} - w_{bi})\times (c_{i} + R_{fi} - c') \\
+\end{aligned}
+\]
+
+\subsubsection{Examples}
+We need the following inputs for the fixed-income performance attribution: portfolio and benchmark durations, weights; benchmark weights of the currency forward contract; spot rates.
+\begingroup
+\fontsize{9pt}{12pt}\selectfont
+\begin{verbatim}
+> data(attrib)
+> Dp = attrib.returns[, 63:72]
+> Db = attrib.returns[, 73:82]
+> wp = attrib.weights[1, ]
+> wb = attrib.weights[2, ]
+> wbf = attrib.weights[4, ]
+> S = attrib.currency[, 11:20]
+\end{verbatim}
+\endgroup
+
+The output looks familiar and all items are self-described.
+\begingroup
+\fontsize{9pt}{12pt}\selectfont
+\begin{verbatim}
+> AttributionFixedIncome(Rp, wp, Rb, wb, Rf, Dp, Db, S, wbf, geometric = FALSE)
+$`Excess returns`
+          Total
+2007 Q2  0.0457
+2007 Q3 -0.0323
+2007 Q4 -0.0204
+2008 Q1 -0.0646
+2008 Q2  0.0478
+2008 Q3 -0.0972
+2008 Q4 -0.0700
+
+$`Market allocation`
+        CA.PA.4   CVX.4 FP.PA.4    GE.4   IBM.4    KO.4   PEP.4   WMT.4   XOM.4  GS10.4   Total
+2007 Q2  0.0052 -0.0262 -0.0462 -0.0067  0.0013  0.0028  0.0027  0.0067  0.0040  0.0547 -0.0015
+2007 Q3 -0.0029 -0.0027  0.0053 -0.0002  0.0000  0.0001  0.0000 -0.0082  0.0001  0.0056 -0.0029
+2007 Q4 -0.0094 -0.0060 -0.0089  0.0035 -0.0084  0.0009  0.0003  0.0002  0.0019  0.0132 -0.0127
+2008 Q1 -0.0926 -0.0081  0.1452 -0.0221 -0.0226 -0.0024 -0.0042 -0.0366 -0.0077 -0.0012 -0.0524
+2008 Q2  0.0708 -0.1137 -0.2688  0.0350 -0.0137  0.0070  0.0016  0.0005 -0.0002  0.0849 -0.1964
+2008 Q3  0.0039  0.1084  0.2232 -0.0142 -0.0137 -0.0136 -0.0115 -0.0193  0.0087 -0.0056  0.2665
+2008 Q4 -0.0942 -0.1229  0.1792 -0.9918 -1.8609 -0.0061 -0.0399 -0.2637 -0.1259 -0.0181 -3.3444
+
+$`Issue selection`
+        CA.PA.4   CVX.4 FP.PA.4    GE.4   IBM.4    KO.4   PEP.4   WMT.4   XOM.4 GS10.4   Total
+2007 Q2 -0.0122  0.0295  0.0467  0.0047  0.0060  0.0008 -0.0004 -0.0005  0.0047 0.0009  0.0802
+2007 Q3 -0.0153  0.0107 -0.0434  0.0007  0.0028  0.0004  0.0013 -0.0058  0.0018 0.0007 -0.0461
+2007 Q4  0.0127 -0.0080 -0.0151 -0.0114 -0.0089  0.0007  0.0005  0.0037 -0.0002 0.0033 -0.0226
+2008 Q1 -0.0185 -0.0158 -0.2114  0.0207  0.0271  0.0033  0.0037  0.0415 -0.0073 0.0052 -0.1515
+2008 Q2 -0.1052  0.1270  0.2720 -0.0565  0.0259 -0.0046 -0.0057  0.0128  0.0170 0.0093  0.2920
+2008 Q3 -0.0121 -0.1466 -0.2968  0.0116  0.0122  0.0133  0.0134  0.0204 -0.0156 0.0122 -0.3880
+2008 Q4  0.0712  0.0937 -0.2159  0.9673  1.8407  0.0034  0.0331  0.2588  0.1233 0.0153  3.1909
+
+$`Currency allocation`
+          CA.PA     CVX   FP.PA      GE     IBM      KO     PEP    WMT     XOM   GS10   Total
+2007 Q2 -0.0089 -0.0440 -0.0344 -0.0070  0.0039  0.0027  0.0028 0.0039  0.0090 0.0146 -0.0575
+2007 Q3 -0.0038  0.0221 -0.0480 -0.0016  0.0018  0.0028 -0.0004 0.0051  0.0063 0.0291  0.0135
+2007 Q4 -0.0046 -0.0212  0.0080  0.0012 -0.0016  0.0006  0.0005 0.0001 -0.0043 0.0678  0.0464
+2008 Q1 -0.0022 -0.0218 -0.0936 -0.0133  0.0062  0.0067  0.0015 0.0072  0.0094 0.0230 -0.0769
+2008 Q2 -0.0089 -0.0399  0.0168 -0.0111  0.0020 -0.0035  0.0027 0.0020  0.0062 0.0192 -0.0144
+2008 Q3 -0.0055  0.0226 -0.0118  0.0087  0.0014  0.0041  0.0001 0.0005  0.0040 0.0491  0.0733
+2008 Q4  0.0007 -0.0173 -0.0505 -0.0116  0.0014  0.0015 -0.0004 0.0059 -0.0004 0.0675 -0.0032
+\end{verbatim}
+\endgroup
+If we select the arithmetic attribution, the currency allocation effect would be absent. This is in parallel with the absence of the interaction effect in the equity performance attribution considered before.
+
+\subsection{Multi-currency attribution}
+The last extension of the performance attribution is to consider the multi-currency portfolio and to take into account currency effects in the analysis more deeply. The multi-currency arithmetic attribution is handled following \cite{ankrim1994multicurrency}. The decomposition is the same as in the standard Brinson model with the only difference that attribution effects are adjusted to currency effects. In multi-currency performance attribution we should specify: the portfolio and the benchmark weights of the currency forward contracts, portfolio and benchmark returns in local currency, benchmark returns hedged into the base currency, the forward and the spot rates.
+\begingroup
+\fontsize{9pt}{12pt}\selectfont
+\begin{verbatim}
+> data(attrib)
+> wpf = attrib.weights[3, ]
+> wbf = attrib.weights[4, ]
+> Rpl = attrib.returns[, 33:42]
+> Rbl = attrib.returns[, 43:52]
+> Rbh = attrib.returns[, 53:62]
+> F = attrib.currency[, 1:10]
+> S = attrib.currency[, 11:20]
+\end{verbatim}
+\endgroup
+
+The only difference is two last objects in the list: currency management and forward premium effects.
+\begingroup
+\fontsize{9pt}{12pt}\selectfont
+\begin{verbatim}
+> Attribution(Rp, wp, Rb, wb, wpf, wbf, S, F, Rpl, Rbl, Rbh, method = "none", linking = "carino")
+$`Excess returns`
+                  Arithmetic
+2007 Q2               0.0457
+2007 Q3              -0.0323
+2007 Q4              -0.0204
+2008 Q1              -0.0646
+2008 Q2               0.0478
+2008 Q3              -0.0972
+2008 Q4              -0.0700
+Annualized Return    -0.1149
+
+$Allocation
+          CA.PA     CVX   FP.PA      GE     IBM      KO     PEP     WMT     XOM    GS10   Total
+2007 Q2  0.0034  0.0273  0.0033  0.0025 -0.0017 -0.0005 -0.0017 -0.0005 -0.0046  0.0234  0.0510
+2007 Q3  0.0005 -0.0320  0.0294 -0.0010 -0.0005 -0.0015  0.0011 -0.0032 -0.0037  0.0039 -0.0070
+2007 Q4 -0.0011  0.0042 -0.0397 -0.0057  0.0039  0.0017  0.0007  0.0033  0.0088 -0.0308 -0.0548
+2008 Q1 -0.0068 -0.0052  0.0432  0.0061 -0.0026 -0.0031  0.0003 -0.0018 -0.0022  0.0113  0.0392
+2008 Q2  0.0029  0.0220 -0.0504  0.0063  0.0003  0.0059 -0.0015  0.0016 -0.0015  0.0016 -0.0126
+2008 Q3 -0.0015 -0.0435 -0.0272 -0.0142  0.0013 -0.0013  0.0013  0.0037  0.0015 -0.0256 -0.1055
+2008 Q4 -0.0104 -0.0119 -0.0040  0.0038  0.0025  0.0023  0.0024 -0.0001  0.0082 -0.0329 -0.0400
+Total   -0.0136 -0.0418 -0.0432 -0.0025  0.0034  0.0032  0.0027  0.0031  0.0071 -0.0511 -0.1326
+
+$Selection
+          CA.PA     CVX   FP.PA      GE     IBM      KO     PEP     WMT     XOM    GS10   Total
+2007 Q2 -0.0041  0.0049  0.0021  0.0005  0.0055  0.0016 -0.0004 -0.0005  0.0059 -0.0011  0.0144
+2007 Q3 -0.0062  0.0020 -0.0024  0.0001  0.0034  0.0009  0.0017 -0.0097  0.0027  0.0011 -0.0063
+2007 Q4  0.0032 -0.0010 -0.0004 -0.0013 -0.0073  0.0014  0.0005  0.0040 -0.0005  0.0038  0.0024
+2008 Q1 -0.0010 -0.0011 -0.0024  0.0007  0.0091  0.0018  0.0005  0.0102 -0.0028  0.0059  0.0207
+2008 Q2 -0.0126  0.0102  0.0039 -0.0027  0.0059 -0.0031 -0.0022  0.0072  0.0077  0.0143  0.0286
+2008 Q3 -0.0009 -0.0060 -0.0035  0.0002  0.0036  0.0024  0.0053  0.0077 -0.0050  0.0143  0.0181
+2008 Q4 -0.0042 -0.0004  0.0002 -0.0035 -0.0159 -0.0016 -0.0049  0.0021  0.0103  0.0188  0.0010
+Total   -0.0243  0.0073 -0.0028 -0.0060  0.0030  0.0032  0.0006  0.0212  0.0171  0.0565  0.0759
+
+$Interaction
+          CA.PA     CVX   FP.PA      GE     IBM      KO     PEP     WMT     XOM    GS10   Total
+2007 Q2 -0.0041  0.0147  0.0298  0.0019 -0.0016 -0.0011  0.0001  0.0002 -0.0029  0.0007  0.0378
+2007 Q3 -0.0062  0.0061 -0.0335  0.0006 -0.0010 -0.0006 -0.0006  0.0049 -0.0014 -0.0007 -0.0324
+2007 Q4  0.0032 -0.0031 -0.0060 -0.0051  0.0021 -0.0010 -0.0002 -0.0020  0.0002 -0.0025 -0.0144
+2008 Q1 -0.0010 -0.0034 -0.0343  0.0026 -0.0026 -0.0012 -0.0002 -0.0051  0.0014 -0.0040 -0.0476
+2008 Q2 -0.0126  0.0306  0.0550 -0.0109 -0.0017  0.0021  0.0007 -0.0036 -0.0038 -0.0096  0.0463
+2008 Q3 -0.0009 -0.0179 -0.0496  0.0007 -0.0010 -0.0016 -0.0018 -0.0038  0.0025 -0.0095 -0.0830
+2008 Q4 -0.0042 -0.0011  0.0031 -0.0141  0.0046  0.0011  0.0016 -0.0011 -0.0052 -0.0126 -0.0278
+Total   -0.0243  0.0218 -0.0390 -0.0238 -0.0009 -0.0021 -0.0002 -0.0106 -0.0086 -0.0377 -0.1254
+
+$`Currency management`
+            EUR     EUR     EUR     EUR     EUR     EUR     EUR     EUR     EUR     EUR   Total
+2007 Q2 -0.0048 -0.0178  0.0125  0.0035 -0.0029  0.0243  0.0059 -0.0029 -0.0092  0.0090  0.0177
+2007 Q3 -0.0013  0.0109 -0.0389  0.0085 -0.0029 -0.0028 -0.0062 -0.0153 -0.0035  0.0135 -0.0380
+2007 Q4 -0.0026  0.0076  0.0070  0.0075 -0.0042  0.0178 -0.0148 -0.0060 -0.0103  0.0159  0.0179
+2008 Q1 -0.0053  0.0095 -0.0205 -0.0050  0.0020 -0.0278 -0.0027  0.0011 -0.0010 -0.0004 -0.0502
+2008 Q2  0.0002 -0.0152  0.0321 -0.0116  0.0012  0.0154  0.0104  0.0090  0.0099 -0.0147  0.0369
+2008 Q3  0.0018 -0.0082 -0.0036 -0.0095  0.0042  0.0126  0.0024 -0.0057  0.0197 -0.0182 -0.0043
+2008 Q4 -0.0038 -0.0148 -0.0105 -0.0105  0.0008  0.0032 -0.0044  0.0249  0.0022 -0.0130 -0.0260
+
+$`Forward Premium`
+            EUR     EUR     EUR     EUR     EUR     EUR     EUR     EUR     EUR     EUR   Total
+2007 Q2 -0.0097 -0.0118 -0.0182 -0.0054  0.0042  0.0023  0.0004  0.0011  0.0067 -0.0340 -0.0644
+2007 Q3  0.0006  0.0235  0.0118 -0.0048  0.0026  0.0007 -0.0002  0.0069  0.0039 -0.0152  0.0298
+2007 Q4  0.0016 -0.0131  0.0295 -0.0001 -0.0003 -0.0009  0.0019 -0.0022 -0.0081  0.0109  0.0193
+2008 Q1 -0.0030 -0.0121 -0.0388 -0.0046  0.0020  0.0016  0.0006  0.0029  0.0043 -0.0245 -0.0715
+2008 Q2 -0.0042 -0.0138  0.0075  0.0009 -0.0006 -0.0042 -0.0001 -0.0037  0.0005  0.0047 -0.0130
+2008 Q3  0.0043  0.0443  0.0172  0.0204 -0.0040  0.0033 -0.0014 -0.0009 -0.0049  0.0334  0.1118
+2008 Q4  0.0025  0.0163 -0.0038  0.0015 -0.0019 -0.0010 -0.0010 -0.0062 -0.0069  0.0304  0.0299
+\end{verbatim}
+\endgroup
+
+\section{Return and risk metrics}
+\subsection{Time-Varying Conditional alpha and beta}
+\cite{ferson1996measuring} and \cite{christopherson1999performance} suggested to relax assumptions of the basic CAPM model allowing for time-varying alphas and betas. The modified regression is then
+\[
+  r_{pt+1}=\alpha_{0p}+\mathbf{A}_{p}'\mathbf{z}_{t}+b_{0p}r_{bt+1}+\mathbf{B}_{p}'[\mathbf{z}_{t}r_{bt+1}]+\mu_{pt+1}
+\]
+The regression allows us to estimate alphas and betas for specified number of periods (conditioning on some information set). The following example illustrates the OLS estimation of alphas and betas when one lag is selected.
+\begingroup
+\fontsize{9pt}{12pt}\selectfont
+\begin{verbatim}
+> data(managers)
+> round(CAPM.dynamic(managers[80:120,1:6], managers[80:120,7,drop=FALSE],
+Rf=managers[80:120,10,drop=FALSE], Z=managers[80:120, 9:10]), 4)
+                    Average alpha US 10Y TR alpha at t - 1 US 3m TR alpha at t - 1
+HAM1 to EDHEC LS EQ       -0.0002                  -0.2389                 -0.4385
+HAM2 to EDHEC LS EQ       -0.0028                  -0.0663                 -4.0177
+HAM3 to EDHEC LS EQ        0.0063                  -0.2173                  7.6805
+HAM4 to EDHEC LS EQ       -0.0033                   0.1614                 -0.2092
+HAM5 to EDHEC LS EQ        0.0043                   0.2688                  3.8497
+HAM6 to EDHEC LS EQ       -0.0054                   0.0500                 -3.0664
+                    Average beta US 10Y TR beta at t - 1 US 3m TR beta at t - 1
+HAM1 to EDHEC LS EQ       1.1793                  3.8612               -51.0141
+HAM2 to EDHEC LS EQ       0.7067                  5.6821               171.1666
+HAM3 to EDHEC LS EQ       0.4261                  1.5079              -705.2035
+HAM4 to EDHEC LS EQ       1.6368                 -7.6221              -565.8520
+HAM5 to EDHEC LS EQ       1.2225                  7.0840                39.7036
+HAM6 to EDHEC LS EQ       1.6282                -11.0351               343.5289
+
+\end{verbatim}
+\endgroup
+
+\subsection{Market timing metrics: \cite{henriksson1981market} and \cite{treynor1966can} models}
+The Treynor-Mazuy model is a quadratic extension of the basic CAPM and is estimated with OLS
+\[
+  R_{p}-R_{f}=\alpha+\beta (R_{b} - R_{f})+\gamma (R_{b}-R_{f})^2+\varepsilon_{p}
+\]
+
+\begingroup
+\fontsize{9pt}{12pt}\selectfont
+\begin{verbatim}
+> data(managers)
+> round(MarketTiming(managers[80:120,1:6], managers[80:120,8:7],
+managers[80:120,10,drop=FALSE], method = "TM"), 4)
+                      Alpha   Beta   Gamma
+HAM1 to SP500 TR     0.0049 0.5970 -0.2802
+HAM2 to SP500 TR     0.0051 0.1190 -0.5000
+HAM3 to SP500 TR     0.0032 0.5273 -0.6646
+HAM4 to SP500 TR     0.0095 0.8780 -0.8155
+HAM5 to SP500 TR     0.0087 0.2870 -2.7728
+HAM6 to SP500 TR     0.0048 0.2902  0.6911
+HAM1 to EDHEC LS EQ -0.0006 1.3121 -0.4051
+HAM2 to EDHEC LS EQ -0.0004 0.4371  8.5206
+HAM3 to EDHEC LS EQ -0.0058 1.1898 11.9138
+HAM4 to EDHEC LS EQ -0.0055 2.0617 18.7973
+HAM5 to EDHEC LS EQ  0.0005 1.0704 -5.0779
+HAM6 to EDHEC LS EQ  0.0004 1.2711 -7.4434
+\end{verbatim}
+\endgroup
+The gamma coefficient captures convexity. In our example in most cases the estimated regression line is concave. This can be interpreted as the absence of the "market timing" ability.
+
+The Merton-Henriksson market timing model is based on the slightly modified regression
+\[
+  R_{p}-R_{f}=\alpha+\beta (R_{b}-R_{f})+\gamma\times max(0,R_{b}-R_{f})+\varepsilon_{p}
+\]
+
+\begingroup
+\fontsize{9pt}{12pt}\selectfont
+\begin{verbatim}
+> MarketTiming(managers[80:120,1:6], managers[80:120,7,drop=FALSE],
+managers[80:120,10,drop=FALSE], method = "HM")
+                            Alpha      Beta       Gamma
+HAM1 to EDHEC LS EQ -0.0003365399 1.3412815 -0.05212598
+HAM2 to EDHEC LS EQ -0.0015584145 0.2205427  0.47286655
+HAM3 to EDHEC LS EQ -0.0054857505 1.0945787  0.33529653
+HAM4 to EDHEC LS EQ -0.0066151355 1.7431499  0.79315879
+HAM5 to EDHEC LS EQ  0.0072167507 1.8204007 -1.25680612
+HAM6 to EDHEC LS EQ  0.0010991550 1.4286362 -0.36338737
+\end{verbatim}
+\endgroup
+
+\subsection{\cite{modigliani1997risk} measure}
+\begingroup
+\fontsize{9pt}{12pt}\selectfont
+\begin{verbatim}
+> data(managers)
+> round(Modigliani(managers[,1:6], managers[,8:7], managers[,8,drop=FALSE]), 4)
+                                             HAM1   HAM2   HAM3   HAM4   HAM5   HAM6
+Modigliani-Modigliani measure: SP500 TR    0.0128 0.0151 0.0132 0.0106 0.0105 0.0184
+Modigliani-Modigliani measure: EDHEC LS EQ 0.0106 0.0117 0.0108 0.0096 0.0095 0.0133
+\end{verbatim}
+\endgroup
+
+\bibliographystyle{plainnat}
+\bibliography{References}
+\end{document}
